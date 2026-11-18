@@ -49,7 +49,7 @@ async function ensurePythonBackend() {
 
     console.log(`[PYTHON ENGINE] Spawning FastAPI database engine on port 8000...`);
     const pyCwd = path.join(__dirname, '../backend_py');
-    pyProcess = spawn('python', ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000'], {
+    pyProcess = spawn('python', ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', '8000', '--reload'], {
         cwd: pyCwd,
         stdio: 'inherit',
         shell: true

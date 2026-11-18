@@ -132,8 +132,17 @@ def dispatch_delivery(
             }
 
     # Case 2: Direct or Citizen Request Manifest dispatch
-    warehouse_id = disp_in.warehouse_id or (db.query(Warehouse.warehouse_id).first()[0] if db.query(Warehouse).first() else 1)
-    disaster_id = disp_in.disaster_id or (db.query(Disaster.disaster_id).first()[0] if db.query(Disaster).first() else 1)
+    if disp_in.warehouse_id:
+        wh_check = db.query(Warehouse).filter(Warehouse.warehouse_id == disp_in.warehouse_id).first()
+        warehouse_id = disp_in.warehouse_id if wh_check else (db.query(Warehouse.warehouse_id).first()[0] if db.query(Warehouse).first() else 1)
+    else:
+        warehouse_id = db.query(Warehouse.warehouse_id).first()[0] if db.query(Warehouse).first() else 1
+
+    if disp_in.disaster_id:
+        dis_check = db.query(Disaster).filter(Disaster.disaster_id == disp_in.disaster_id).first()
+        disaster_id = disp_in.disaster_id if dis_check else (db.query(Disaster.disaster_id).first()[0] if db.query(Disaster).first() else 1)
+    else:
+        disaster_id = db.query(Disaster.disaster_id).first()[0] if db.query(Disaster).first() else 1
 
     delivery = Delivery(
         warehouse_id=warehouse_id,
@@ -150,6 +159,11 @@ def dispatch_delivery(
     if disp_in.items and len(disp_in.items) > 0:
         for itm in disp_in.items:
             r_id = itm.get("resource_id") or itm.get("RESOURCETYPEID") or itm.get("id") or 1
+            res_exists = db.query(Resource).filter(Resource.resource_id == r_id).first()
+            if not res_exists:
+                first_res = db.query(Resource.resource_id).first()
+                r_id = first_res[0] if first_res else 1
+
             q = int(itm.get("quantity") or itm.get("quantity_requested") or itm.get("QUANTITYREQUIRED") or itm.get("qty") or 10)
             inv = db.query(Inventory).filter(
                 Inventory.warehouse_id == warehouse_id,
@@ -170,6 +184,11 @@ def dispatch_delivery(
             total_dispatched_units += q
     else:
         resource_id = disp_in.resource_id or (db.query(Resource.resource_id).first()[0] if db.query(Resource).first() else 1)
+        res_exists = db.query(Resource).filter(Resource.resource_id == resource_id).first()
+        if not res_exists:
+            first_res = db.query(Resource.resource_id).first()
+            resource_id = first_res[0] if first_res else 1
+
         qty = disp_in.quantity or 100
         inv = db.query(Inventory).filter(
             Inventory.warehouse_id == warehouse_id,
@@ -239,38 +258,37 @@ def confirm_delivery_direct(
             "delivered_at": delivery.delivered_at
         }
 
-    if len(delivery.items) > 1:
-        for itm in delivery.items:
-            itm.quantity_received = itm.quantity_dispatched
-            itm.quantity_damaged = 0
+    items_to_reconcile = delivery.items if delivery.items else db.query(DeliveryItem).filter(DeliveryItem.delivery_id == del_id).all()
+    if items_to_reconcile:
+        for itm in items_to_reconcile:
+            if len(items_to_reconcile) == 1 and body.quantity_received and body.quantity_received > 0:
+                itm.quantity_received = min(body.quantity_received, itm.quantity_dispatched)
+                itm.quantity_damaged = body.quantity_damaged or 0
+            else:
+                itm.quantity_received = itm.quantity_dispatched
+                itm.quantity_damaged = body.quantity_damaged or 0
+
             inv = db.query(Inventory).filter(
                 Inventory.warehouse_id == delivery.warehouse_id,
                 Inventory.resource_id == itm.resource_id
             ).first()
             if inv:
-                deduct_amt = min(inv.quantity_reserved, itm.quantity_dispatched)
+                deduct_amt = min(inv.quantity_reserved, itm.quantity_received)
                 inv.quantity_reserved = max(0, inv.quantity_reserved - deduct_amt)
-        delivery.delivery_status = "DELIVERED"
-        delivery.delivered_at = datetime.utcnow()
-        delivery.receiver_name = body.received_by or "Field Officer"
-        delivery.proof_of_delivery_note = body.proof_of_delivery or "Signed field receipt note"
-        db.commit()
-        db.refresh(delivery)
-    else:
-        item = db.query(DeliveryItem).filter(DeliveryItem.delivery_id == del_id).first()
-        qty_to_receive = body.quantity_received
-        if not qty_to_receive or qty_to_receive <= 0:
-            qty_to_receive = item.quantity_dispatched if item else 1
 
-        delivery = WorkflowService.confirm_delivery(
-            db=db,
-            delivery_id=del_id,
-            user=current_user,
-            quantity_received=qty_to_receive,
-            quantity_damaged=body.quantity_damaged or 0,
-            receiver_name=body.received_by or "Field Officer",
-            proof_note=body.proof_of_delivery or "Signed field receipt note"
-        )
+    delivery.delivery_status = "DELIVERED"
+    delivery.delivered_at = datetime.utcnow()
+    delivery.receiver_name = body.received_by or "Field Officer"
+    delivery.proof_of_delivery_note = body.proof_of_delivery or "Signed field receipt note"
+    db.commit()
+    db.refresh(delivery)
+
+    AuditService.log_workflow_event(
+        db, delivery.disaster_id, "DELIVERY_CONFIRMED", current_user.user_id,
+        previous_state="DISPATCHED", new_state="DELIVERED",
+        reason=f"Received delivery convoy #{delivery.delivery_id} by {delivery.receiver_name}"
+    )
+
     return {
         "success": True,
         "message": "Delivery confirmation stamped and inventory reconciled.",

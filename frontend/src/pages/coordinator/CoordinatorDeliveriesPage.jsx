@@ -189,7 +189,8 @@ export default function CoordinatorDeliveriesPage() {
       setShowDispatchModal(false);
       await fetchDeliveries();
     } catch (err) {
-      error(err.message || 'Dispatch creation failed.');
+      const errMsg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || 'Dispatch creation failed.';
+      error(typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg));
     } finally {
       setProcessing(false);
     }
@@ -221,7 +222,8 @@ export default function CoordinatorDeliveriesPage() {
       setConfirmModal(null);
       await fetchDeliveries();
     } catch (err) {
-      error(err.message || 'Delivery confirmation failed.');
+      const errMsg = err?.response?.data?.detail || err?.response?.data?.message || err?.message || 'Delivery confirmation failed.';
+      error(typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg));
     } finally {
       setProcessing(false);
     }
