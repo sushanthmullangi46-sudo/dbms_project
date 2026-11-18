@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 from datetime import datetime
 from app.database import get_db
-from app.models.schema import Delivery, DeliveryItem, ResourceAllocation, UserAccount, Warehouse, Disaster, Resource, Inventory
+from app.models.schema import Delivery, DeliveryItem, ResourceAllocation, UserAccount, Warehouse, Disaster, Resource, Inventory, ResourceRequest
 from app.schemas.dtos import DeliveryDispatchCreate, DeliveryConfirmationRequest
 from app.auth.security import get_current_user, require_role
 from app.services.workflow_service import WorkflowService
