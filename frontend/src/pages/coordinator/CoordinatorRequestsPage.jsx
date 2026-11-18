@@ -119,14 +119,16 @@ export default function CoordinatorRequestsPage() {
 
     if (targetItem) {
       // Approve single item
+      const remaining = Math.max(0, (targetItem.quantity_requested || 0) - (targetItem.quantity_approved || 0));
       setItemQuantities({
-        [targetItem.resource_id]: targetItem.quantity_requested
+        [targetItem.resource_id]: remaining > 0 ? remaining : targetItem.quantity_requested
       });
     } else {
-      // Approve all items
+      // Approve all items - default to remaining unallocated quantities
       const qtys = {};
       rawItems.forEach(itm => {
-        qtys[itm.resource_id] = itm.quantity_requested;
+        const remaining = Math.max(0, (itm.quantity_requested || 0) - (itm.quantity_approved || 0));
+        qtys[itm.resource_id] = remaining;
       });
       setItemQuantities(qtys);
     }
@@ -395,7 +397,8 @@ export default function CoordinatorRequestsPage() {
                   {(approvalModal.items || approvalModal.ITEMS || []).map((itm) => {
                     const rId = itm.resource_id;
                     const rName = itm.resource_name || `Resource #${rId}`;
-                    const currentVal = itemQuantities[rId] ?? itm.quantity_requested;
+                    const remaining = Math.max(0, (itm.quantity_requested || 0) - (itm.quantity_approved || 0));
+                    const currentVal = itemQuantities[rId] ?? remaining;
 
                     return (
                       <div
@@ -407,7 +410,7 @@ export default function CoordinatorRequestsPage() {
                           <div className="truncate">
                             <span className="font-semibold text-slate-200 block truncate">{rName}</span>
                             <span className="text-[10px] text-slate-400">
-                              Req: {itm.quantity_requested} {itm.unit || 'Units'}
+                              Req: {itm.quantity_requested} • Approved: {itm.quantity_approved || 0} • <strong className="text-cyan-400 font-bold">Needed: {remaining}</strong> {itm.unit || 'Units'}
                             </span>
                           </div>
                         </div>
@@ -416,7 +419,7 @@ export default function CoordinatorRequestsPage() {
                           <input
                             type="number"
                             min="0"
-                            max={itm.quantity_requested * 2}
+                            max={Math.max(1, remaining)}
                             value={currentVal}
                             onChange={(e) => {
                               const v = Math.max(0, parseInt(e.target.value) || 0);

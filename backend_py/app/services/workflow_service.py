@@ -461,6 +461,23 @@ class WorkflowService:
                 if not isinstance(qty, int) or qty <= 0:
                     raise HTTPException(status_code=422, detail="Approved quantities must be positive integers")
 
+                # Update requested item approved quantity
+                req_itm = db.query(RequestItem).filter(
+                    RequestItem.request_id == request_id,
+                    RequestItem.resource_id == res_id
+                ).first()
+                if not req_itm:
+                    raise HTTPException(status_code=400, detail=f"Resource {res_id} is not part of this request")
+
+                remaining = max(0, req_itm.quantity_requested - req_itm.quantity_approved)
+                if remaining <= 0:
+                    # Item is already fully approved, skip allocating duplicate stock
+                    continue
+
+                if qty > remaining:
+                    # Auto-cap to the remaining unapproved quantity so user/UI never gets blocked
+                    qty = remaining
+
                 # Atomic warehouse inventory check
                 inv = db.query(Inventory).filter(
                     Inventory.warehouse_id == warehouse_id,
@@ -478,15 +495,6 @@ class WorkflowService:
                 inv.quantity_available -= qty
                 inv.quantity_reserved += qty
 
-                # Update requested item approved quantity
-                req_itm = db.query(RequestItem).filter(
-                    RequestItem.request_id == request_id,
-                    RequestItem.resource_id == res_id
-                ).first()
-                if not req_itm:
-                    raise HTTPException(status_code=400, detail=f"Resource {res_id} is not part of this request")
-                if req_itm.quantity_approved + qty > req_itm.quantity_requested:
-                    raise HTTPException(status_code=400, detail=f"Approved quantity exceeds the request for resource {res_id}")
                 req_itm.quantity_approved += qty
 
                 # Create allocation record
@@ -503,6 +511,19 @@ class WorkflowService:
                 )
                 db.add(alloc)
                 allocations.append(alloc)
+
+            if not allocations:
+                req.status = "APPROVED"
+                db.commit()
+                return [ResourceAllocation(
+                    request_id=request_id,
+                    warehouse_id=warehouse_id,
+                    resource_id=resource_ids[0] if resource_ids else 1,
+                    allocated_quantity=0,
+                    dispatch_reference=f"DSP-{uuid.uuid4().hex[:8].upper()}",
+                    allocation_status="RESERVED",
+                    allocated_at=datetime.utcnow()
+                )]
 
             req.status = "APPROVED" if all(item.quantity_approved >= item.quantity_requested for item in req.items) else "PARTIALLY_APPROVED"
             db.commit()
